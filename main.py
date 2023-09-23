@@ -1,16 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# @Time: 2023-09-18 15:22
+# @Time: 2023年9月26日13:21:25
 # @File: main.py
 # @Author: YeHwong
 # @Email: 598318610@qq.com
-# @Version ：1.0.0
+# @Version ：2.0.0
 
-import csv, random, sys, os, time, serial, pyqtgraph as pg
-from serial.tools import list_ports
+import csv
+import os
+import pyqtgraph as pg
+import random
+import serial
+import sys
+import time
+
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QLabel, QMessageBox
+from serial.tools import list_ports
+
 from DaqUI import Ui_MainWindow
 from LogSet import Logger
 
@@ -46,7 +54,7 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
         self.saveButton.clicked.connect(self.clear_plot)
         self.lcdNumber.setSmallDecimalPoint(True)
         self.statusbar.showMessage('实时更新的信息', 0)
-        self.statusbar.addPermanentWidget((self.com_status), stretch=0)
+        self.statusbar.addPermanentWidget(self.com_status, stretch=0)
         pg.setConfigOption('background', 'k')
         pg.setConfigOption('foreground', 'd')
         self.plot_plt.showGrid(x=True, y=True)
@@ -54,6 +62,8 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
         self.plot_plt.setYRange(100, 0)
 
     def start_acq(self):
+        if self.openButton.text() == '打开串口':
+            self.open_close_port()
         if self.startButton.text() == '开始采集':
             self.index = 1
             self.data_list = []
@@ -83,23 +93,21 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
         acq_param = ''
         value = None
         if self.comboBox_2.currentIndex() == 0:
-            acq_param = '100300040001C68A'
-        else:
-            if self.comboBox_2.currentIndex() == 1:
-                acq_param = '100300050001974A'
-            else:
-                if self.comboBox_2.currentIndex() == 2:
-                    acq_param = '020300040001C5F8'
-                else:
-                    self.ser.isOpen() or self.open_close_port()
-        receive_data = self.send_data(acq_param)
-        if receive_data:
-            value = self.dataParse(receive_data)
+            acq_param = '010300040001C5CB'
+        elif self.comboBox_2.currentIndex() == 1:
+            acq_param = '010300050001940B'
+        elif self.comboBox_2.currentIndex() == 2:
+            acq_param = '020300040001C5F8'
+
+        self.ser.isOpen() or self.open_close_port()
+        receives_data = self.send_data(acq_param)
+        if receives_data:
+            value = self.dataParse(receives_data)
             self.lcdNumber.display(value)
             self.time_list.append(self.index * self.time_gap)
             self.data_list.append(value)
             self.daq_log.info(f"Get index:{self.index} Value:{value}")
-            self.plot_plt.plot().setData((self.time_list), (self.data_list), pen=(self.pen_color))
+            self.plot_plt.plot().setData(self.time_list, self.data_list, pen=self.pen_color)
             self.index += 1
         return value
 
@@ -133,12 +141,8 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
             try:
                 self.ser.open()
             except Exception as e:
-                try:
-                    self.daq_log.info(f"port Error:{str(e)}")
-                    self.statusbar.showMessage('串口状态：异常' + self.ser.name)
-                finally:
-                    e = None
-                    del e
+                self.daq_log.info(f"port Error:{str(e)}")
+                self.statusbar.showMessage('串口状态：异常' + self.ser.name)
 
             if self.ser.isOpen():
                 self.daq_log.info(f"串口打开正常：{self.ser.name}")
@@ -151,11 +155,7 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
             try:
                 self.ser.close()
             except Exception as e:
-                try:
-                    self.log_print.error(e)
-                finally:
-                    e = None
-                    del e
+                self.daq_log.error(e)
 
             if not self.ser.isOpen():
                 self.statusbar.showMessage('串口状态：关闭' + self.ser.name)
@@ -164,33 +164,30 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def receive_data(self):
         # TODO --->接收串口数据
-        self.data_now = ""
+        self.thread().msleep(10)
+        data_now = ""
         try:
             num = self.ser.inWaiting()
             if num:
-                self.thread().msleep(20)
+                self.thread().msleep(10)
                 while self.ser.inWaiting() > num > 0:
                     num = self.ser.inWaiting()
-                    self.log_print.debug('-------------------警告：数据缺失--------------------num:' + str(num))
-                    self.thread().msleep(30)
-                    self.log_print.debug('-------------------警告：数据缺失--------------------' + str(self.ser.inWaiting()))
+                    self.daq_log.debug('-------------------警告：数据缺失--------------------num:' + str(num))
+                    self.thread().msleep(10)
+                    self.daq_log.debug('-------------------警告：数据缺失--------------------' + str(self.ser.inWaiting()))
                 else:
                     if num == self.ser.inWaiting() and num:
                         data = self.ser.read(num)
                         # hex显示
-                        if self.hex_check.isChecked():
-                            out_s = ''
-                            for i in range(0, len(data)):
-                                out_s = out_s + '{:02X}'.format(data[i]) + ' '
-                            self.daq_log.info("[{0}]接收<---:{1}".format(0, out_s))
-                            self.data_now = out_s
-                        else:
-                            # 串口接收到的字符串为b'123',要转化成unicode字符串才能输出到窗口中去
-                            self.daq_log.info("[{0}]接收<---:{1}".format(0, data.decode('gbk') + '\n'))
-
+                        out_s = ''
+                        for i in range(0, len(data)):
+                            out_s = out_s + '{:02X}'.format(data[i]) + ' '
+                        self.daq_log.info("[{0}]接收<---:{1}".format(0, out_s))
+                        data_now = data
         except Exception as e:
             print(e)
-        return self.data_now
+        print("data type:{}".format(type(self.data_now)))
+        return data_now
 
     def send_data(self, input_data):
         input_s = ''
@@ -219,26 +216,18 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
 
                     ips = '发送--->:{}'.format(str(ips))
                     self.daq_log.debug(ips)
-                else:
-                    if self.send_data_type == 'ASCII':
-                        input_s = (input_data + '\r\n').encode('utf-8')
-                        self.daq_log.info(input_s)
-                    else:
-                        if self.send_data_type == 'BYTES':
-                            input_s = input_data
-                        try:
-                            self.ser.reset_input_buffer()
-                            num = self.ser.write(input_s)
-                            time.sleep(0.04)
-                            acq_data = self.receive_data()
-                        except Exception as e:
-                            try:
-                                print(e)
-                                self.daq_log.error(e)
-                            finally:
-                                e = None
-                                del e
-
+                elif self.send_data_type == 'ASCII':
+                    input_s = (input_data + '\r\n').encode('utf-8')
+                    self.daq_log.info(input_s)
+                elif self.send_data_type == 'BYTES':
+                    input_s = input_data
+            try:
+                self.ser.reset_input_buffer()
+                # num = self.ser.write(input_s)
+                time.sleep(0.04)
+                acq_data = self.receive_data()
+            except Exception as e:
+                self.daq_log.error(e)
         else:
             QMessageBox.critical(self, 'port Error', '此串口未打开！')
             self.daq_log.warn('串口未打开!')
@@ -268,13 +257,11 @@ class DAQGraph(QtWidgets.QMainWindow, Ui_MainWindow):
 
 
 def random_color():
-    colorArr = [
-     "'1'", "'2'", "'3'", "'4'", "'5'", "'6'", "'7'", "'8'", "'9'",
-     "'A'", "'B'", "'C'", "'D'", "'E'"]
+    colorArr = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E"]
     color = ''
     for i in range(6):
         color += colorArr[random.randint(0, 13)]
-
+    print("color:{}".format(color))
     return '#' + color
 
 
